@@ -4,7 +4,8 @@
     "description":  "Agente de diagnóstico DTC offline + catálogo de manuais do proprietário com download de PDF",
     "scripts":  {
                     "catalogo":  "node tools/gerar-catalogo.mjs",
-                    "baixar":  "node tools/baixar-manuais.mjs"
+                    "baixar":  "node tools/baixar-manuais.mjs",
+                    "diagnostico":  "node tools/diagnostico.mjs"
                 },
     "license":  "MIT",
     "type":  "commonjs",

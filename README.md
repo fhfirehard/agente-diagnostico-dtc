@@ -1,28 +1,77 @@
-# 🔧 Agente de Diagnóstico DTC + Catálogo de Manuais
+# 🔧 Agente de Diagnóstico Automotivo + Catálogo de Manuais
 
 Ferramenta **100% offline** para oficinas mecânicas: interpreta códigos de falha
-(DTC) de qualquer scanner OBD-II e aponta causas prováveis rankeadas + roteiro de
-testes. Inclui catálogo navegável de **manuais do proprietário** (30 marcas,
-4.500+ modelos) com **download de PDF** para uso offline.
+(DTC) de qualquer scanner OBD-II, avalia **dados ao vivo** (trims, temperatura,
+MAF, sonda, bateria), cruza sintomas e aponta **causas prováveis rankeadas +
+roteiro de testes**. Inclui catálogo navegável de **manuais do proprietário**
+(carros, motos e barcos — 7.400+) com download de PDF para uso offline.
+
+> Este projeto é a **fusão e reformulação** de dois repositórios do autor:
+> `car-diagnostics-agent` (protótipo CLI em Python) e `agente-diagnostico-dtc`.
+> O agente Python foi aposentado em favor de uma base única (`kb.js`) usada
+> simultaneamente pela **interface web** e pela **CLI Node**. Veja
+> [O que mudou na fusão](#-o-que-mudou-na-fusão) para detalhes.
 
 ## Como usar
 
-**Agente de diagnóstico** — abra `index.html` (duplo clique, funciona sem servidor):
+**1. Interface web** — abra `index.html` (duplo clique, funciona sem servidor).
+Três modos de entrada:
 
-1. Cole os códigos do scanner (ex.: `P0171 P0300 U0100`) e clique em **⚡ Interpretar**
-2. O agente mostra: título do código, sintomas típicos, **causas ordenadas por
-   probabilidade (%)** e **roteiro de testes prático** (multímetro, osciloscópio,
-   scanner) — clique nos testes para marcar como feitos
-3. Múltiplos códigos são **cruzados** — ex.: `P0128 + P0172` → "termostato preso
-   explica a mistura rica; troque o termostato antes de condenar sonda/bicos"
-4. Sem código? Use a **busca por sintoma** ("não parte", "trepidação", "consumo alto")
-5. **🖨️ Imprimir relatório** gera PDF para o cliente
+| Modo | O que faz |
+|---|---|
+| **Códigos** | Cole os códigos do scanner (`P0171 P0300 U0100`) e clique em ⚡ Interpretar |
+| **JSON do scanner** | Cole/importe o JSON exportado pelo scanner ou app (`samples/scanner-exemplo.json` tem o formato) — o agente cruza veículo + códigos + sintomas + dados ao vivo |
+| **Sintoma** | Sem código? Busque por "não parte", "trepidação", "consumo alto"... |
 
-**Catálogo de manuais** — abra `manuais/index.html`:
+O relatório mostra: título do código, severidade (Leve/Moderada/Crítica),
+**causas ordenadas por probabilidade (%)**, **roteiro de testes prático**
+(multímetro, osciloscópio, scanner — clique para marcar como feitos),
+**análise combinada** entre códigos e **sugestão do manual do veículo**
+(✔ LOCAL = PDF já baixado). 🖨️ **Imprimir** gera PDF para o cliente.
 
-- Navegue por marca ou busque marca+modelo
-- Links abrem o manual online (ManualPDF.com.br) — **✔ LOCAL** = PDF já baixado,
-  abre direto da pasta `manuais/pdfs/` e funciona offline
+**2. CLI (terminal)** — mesma base de conhecimento:
+
+```bash
+node tools/diagnostico.mjs samples/scanner-exemplo.json     # analisa JSON do scanner
+node tools/diagnostico.mjs --codigos "P0171 P0300 U0100"    # códigos soltos
+node tools/diagnostico.mjs scanner.json --json              # saída em JSON (p/ integrar)
+```
+
+**3. Catálogo de manuais** — abra `manuais/index.html`:
+
+- 3 abas: Carros · Motocicletas · Barcos, filtro marca→modelo, busca global
+- ✔ LOCAL = PDF já baixado em `manuais/pdfs/`, abre direto e funciona offline
+- Demais: abrem no site de origem (ManualPDF.com.br)
+
+## Formato do JSON de scanner
+
+Campos flexíveis (português **ou** inglês):
+
+```json
+{
+  "vehicle":   { "make": "Fiat", "model": "Siena", "year": 2011, "engine": "1.4" },
+  "dtcs":      ["P0171", "P0300"],
+  "symptoms":  ["marcha lenta irregular", "consumo alto"],
+  "live_data": { "rpm_idle": 620, "stft_b1_percent": 18.5, "ltft_b1_percent": 12.0,
+                 "maf_gps_idle": 2.1, "coolant_temp_c": 88, "o2_b1_v": 0.15,
+                 "battery_v": 11.9 },
+  "notes":     "Falha pior com ar-condicionado ligado."
+}
+```
+
+Aceitos: `vehicle`/`veiculo` · `dtcs`/`codes`/`codigos` · `symptoms`/`sintomas` ·
+`live_data`/`dados_ao_vivo` · `notes`/`observacoes`.
+
+**Dados ao vivo avaliados automaticamente** (status ✓ ok / ⚠ atenção / ✗ problema):
+
+| PID | Interpretação |
+|---|---|
+| STFT/LTFT (trims) | \|soma\| > 15% = mistura magra/rica crônica (reforça P0171/P0172) |
+| RPM de lenta | < 500 = lenta baixa (P0505) · > 900 = lenta alta (P0507) |
+| Temperatura (ECT) | > 105°C = superaquecendo (PARE — P0217) · < 75°C quente = termostato preso (P0128) |
+| MAF g/s em lenta | fora de 1,5–7 g/s = MAF sub/superestimando (P0101) |
+| Sonda O2 B1S1 | preso < 0,2 V ou > 0,8 V = sonda saturada/mistura fixa (P0130) |
+| Tensão bateria | < 11,8 V = bateria fraca (códigos aleatórios!) · > 15,2 V = sobrecarga (P0563) |
 
 ## Baixar manuais (PDFs reais)
 
@@ -30,18 +79,17 @@ testes. Inclui catálogo navegável de **manuais do proprietário** (30 marcas,
 npm install                    # instala sharp (conversão de imagem p/ PDF)
 
 node tools/baixar-manuais.mjs fiat/siena-2011        # um modelo
-node tools/baixar-manuais.mjs fiat volkswagen        # marcas inteiras
-node tools/baixar-manuais.mjs fiat --pags 50         # só 50 páginas (teste rápido)
-node tools/baixar-manuais.mjs --listar fiat          # lista modelos da marca
+node tools/baixar-manuais.mjs fiat volkswagen honda  # marcas inteiras
+node tools/baixar-manuais.mjs --tudo                 # TODOS (carros+motos+barcos)
+node tools/baixar-manuais.mjs --status               # progresso atual
 ```
 
-Para cada manual: baixa as páginas, monta o **PDF real** em
+Para cada manual: baixa as páginas em alta resolução, monta o **PDF real** em
 `manuais/pdfs/{marca}/{modelo}.pdf`, gera `leitor.html` offline e atualiza o
-índice local do catálogo.
+índice do catálogo. **Retomável** — interrompa e rode de novo sem perder nada.
 
-> **Volume:** um manual ≈ 5–15 MB. Uma marca inteira (ex.: Toyota, 385 manuais)
-> ≈ 3–5 GB e vários minutos de download. A pasta `manuais/pdfs/` é ignorada pelo
-> git por padrão — descomente no `.gitignore` se quiser versionar.
+> **Volume:** um manual ≈ 5–15 MB. Os 7.400 manuais ≈ 40–70 GB (dias de
+> download). A pasta `manuais/pdfs/` é ignorada pelo git.
 
 ## Atualizar o catálogo
 
@@ -49,22 +97,56 @@ Para cada manual: baixa as páginas, monta o **PDF real** em
 node tools/gerar-catalogo.mjs
 ```
 
-Regenera `manuais/catalogo.js` a partir do índice público do ManualPDF.com.br.
-
 ## Estrutura
 
 ```
-├── index.html                 Agente de diagnóstico DTC
-├── kb.js                      Base de conhecimento (~65 códigos DTC + macetes)
+├── index.html                  Agente (web): códigos + JSON scanner + sintomas
+├── kb.js                       Base de conhecimento compartilhada (UI + CLI)
+│                               ~65 códigos DTC + regras de live data + regras combinadas
+├── samples/
+│   └── scanner-exemplo.json    Exemplo de entrada do scanner
 ├── manuais/
-│   ├── index.html             Catálogo navegável de manuais
-│   ├── catalogo.js            30 marcas · 4.500+ modelos (gerado)
-│   └── pdfs/                  PDFs baixados (ignorado pelo git)
+│   ├── index.html              Catálogo navegável (3 categorias)
+│   ├── catalogo.js             7.400 manuais (gerado)
+│   └── pdfs/                   PDFs baixados (ignorado pelo git)
 ├── tools/
-│   ├── gerar-catalogo.mjs     Gera o catálogo de links
-│   └── baixar-manuais.mjs     Baixa manuais e monta PDFs
-└── README.md
+│   ├── diagnostico.mjs         CLI de diagnóstico (usa kb.js)
+│   ├── baixar-manuais.mjs      Downloader paralelo com retomada
+│   └── gerar-catalogo.mjs      Gera o catálogo de links
+└── README.md · LICENSE (MIT) · package.json
 ```
+
+## 📦 O que mudou na fusão
+
+Os dois repos anteriores tinham abordagens complementares — este unifica tudo:
+
+**Vindo de `car-diagnostics-agent` (CLI Python)** e reformulado:
+
+- ✅ **Entrada JSON de scanner** (`vehicle/dtcs/symptoms/live_data`) → agora na
+  UI web **e** na CLI, com parser que aceita nomes em pt/en
+- ✅ **Avaliação de dados ao vivo** (trims, temperatura, MAF...) → regras
+  reais implementadas em `kb.js` (o protótipo só ecoava os valores)
+- ✅ **Amostra de exemplo** (`samples/scanner-exemplo.json`, baseada no Jeep)
+- ❌ Descartado: PDFs Toyota (~73 MB) commitados no histórico — material
+  com copyright não deve ser versionado; os manuais agora ficam em
+  `manuais/pdfs/` (fora do git) e são baixados sob demanda pela ferramenta
+- ❌ Descartado: `manuals/external/` (conteúdo copiado de repos de terceiros,
+  arquivos soltos de outro projeto) e scripts Python com caminhos temporários
+  gravados no código
+
+**Vindo de `agente-diagnostico-dtc`** (base mantida e expandida):
+
+- ✅ Base de conhecimento ~65 códigos (vs 5 do protótipo) com causas rankeadas
+- ✅ Interface web com relatório imprimível e busca por sintoma
+- ✅ Catálogo de 7.400 manuais (3 categorias) + downloader de PDFs
+
+**Novidades da fusão:**
+
+- ✨ Base de conhecimento **única** (`kb.js`) usada pela web e pela CLI — sem
+  lógica duplicada entre linguagens
+- ✨ CLI Node substitui o protótipo Python (sem dependências Python)
+- ✨ Sugestão automática do manual do veículo no relatório (detecta marca/modelo,
+  aponta PDF local ou link para baixar)
 
 ## Fontes do conhecimento
 
@@ -77,7 +159,7 @@ ManualPDF.com.br). Nenhum conteúdo protegido foi copiado.
 ## Avisos
 
 - ⚠️ Ferramenta de **apoio didático** — confirme sempre na documentação oficial
-  da montadora antes de executar reparos.
+  da montadora antes de executar reparos. Diagnóstico é **preliminar**.
 - 📄 Os PDFs baixados pertencem às montadoras; o site de origem os distribui
   gratuitamente. Use para consulta pessoal na oficina — **não redistribua**.
 - ⚠️ Cuidado com "pacotes" de Simplo/Dicatec/Doutor-IE de revendedores: as

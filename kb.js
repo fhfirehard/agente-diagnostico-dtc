@@ -601,3 +601,100 @@ const TIPS = [
 "Catalisador removido/falsificado acende P0420/P0430 sem que a sonda esteja errada.",
 "Scanner genérico não lê todos os módulos. Use scanner com acesso ao TCM/ABS/BCM para diagnóstico completo."
 ];
+
+// ---------- 5. ANÁLISE DE DADOS AO VIVO (live data / freeze frame) ----------
+// Avalia os PIDs mais úteis (trims, rotação, temperatura, MAF, sonda, tensão).
+// Usada pela UI (index.html) e pelo CLI (tools/diagnostico.mjs).
+// Valores de referência gerais — confirme a tabela específica do motor no
+// manual do proprietário / Simplo / Dicatec / Doutor-IE.
+// Status: 1 = ok · 2 = atenção · 0 = provável problema
+const LIVE_RULES = [
+ {regra:"Trims de combustível (STFT/LTFT)",
+  pega:d=>{const s=d.stft??d.stft_b1??d.stft_b1_percent??d.stft_percent;const l=d.ltft??d.ltft_b1??d.ltft_b1_percent??d.ltft_percent;
+    return (s==null&&l==null)?null:{s:+s||0,l:+l||0}},
+  medir:t=>{const tot=t.s+t.l;const sig=(tot>0?"+":"")+tot.toFixed(1)+"%";
+    if(tot>15) return {status:0,msg:sig+" — mistura MAGRA crônica confirmada. Reforça vazamento de ar não medido, MAF subestimando ou pressão/bicos insuficientes.",ref:["P0171","P0131"]};
+    if(tot<-15) return {status:0,msg:sig+" — mistura RICA crônica. Reforça bico vazando, pressão alta ou MAF superestimando.",ref:["P0172","P0132"]};
+    if(Math.abs(tot)>10) return {status:2,msg:sig+" — desvio no limite. Re-meça com motor quente (a ECU pode estar compensando).",ref:[]};
+    return {status:1,msg:sig+" — dentro da faixa normal (±10%).",ref:[]}}},
+ {regra:"Rotação de marcha lenta",
+  pega:d=>{const v=d.rpm_idle??d.rpm_lenta??d.rpm;return v==null?null:+v},
+  medir:v=>v<500?{status:2,msg:v+" rpm — lenta BAIXA. Suspeite corpo de borboleta sujo / IAC / adaptação pendente.",ref:["P0505"]}
+    :v>900?{status:2,msg:v+" rpm — lenta ALTA. Suspeite vazamento de ar ou borboleta presa aberta.",ref:["P0507"]}
+    :{status:1,msg:v+" rpm — dentro do típico (600–900).",ref:[]}},
+ {regra:"Temperatura do motor (ECT)",
+  pega:d=>{const v=d.coolant_temp_c??d.ect_c??d.temp_agua??d.temp_liquido??d.ect;return v==null?null:+v},
+  medir:v=>v>105?{status:0,msg:v+"°C — SUPERAQUECENDO. Pare o motor e verifique vazamento, ventilador, termostato e bomba d'água.",ref:["P0217"]}
+    :v<75?{status:2,msg:v+"°C — abaixo da faixa de trabalho (80–100°C). Se o motor já roda há +15 min, termostato preso aberto.",ref:["P0128"]}
+    :{status:1,msg:v+"°C — em operação normal.",ref:[]}},
+ {regra:"MAF em marcha lenta",
+  pega:d=>{const v=d.maf_gps_idle??d.maf_g_s??d.maf_gps??d.maf;return v==null?null:+v},
+  medir:v=>v<1.5?{status:2,msg:v+" g/s — leitura baixa em lenta. MAF subestimando (sujo) ou fuga de ar após o MAF. Compare com a tabela do motor.",ref:["P0101","P0171"]}
+    :v>7?{status:2,msg:v+" g/s — leitura alta em lenta (típico: 2–5 g/s em motor 1.0–2.0L). MAF superestimando → mistura rica.",ref:["P0101","P0172"]}
+    :{status:1,msg:v+" g/s — plausível para lenta.",ref:[]}},
+ {regra:"Sonda lambda B1S1 (tensão)",
+  pega:d=>{const v=d.o2_b1_v??d.o2_b1s1_v??d.o2_volts??d.tensao_sonda??d.o2_b1;return v==null?null:+v},
+  medir:v=>v<0.2?{status:2,msg:v.toFixed(2)+" V — sinal preso embaixo (magro constante). Sonda saturada ou mistura fixa magra — deve oscilar 0,1–0,9 V.",ref:["P0130","P0131"]}
+    :v>0.8?{status:2,msg:v.toFixed(2)+" V — sinal preso em cima (rico constante). Sonda saturada, bico vazando ou pressão alta.",ref:["P0130","P0132"]}
+    :{status:1,msg:v.toFixed(2)+" V — dentro da janela de oscilação.",ref:[]}},
+ {regra:"Tensão elétrica",
+  pega:d=>{const v=d.battery_v??d.tensao_bateria??d.volts;return v==null?null:+v},
+  medir:v=>v<11.8?{status:0,msg:v.toFixed(1)+" V — bateria FRACA/descarregada. Causa clássica de códigos aleatórios em vários módulos. Teste a bateria antes de tudo.",ref:["P0562"]}
+    :v>15.2?{status:0,msg:v.toFixed(1)+" V — SOBRECARGA. Regulador do alternador preso — pode queimar módulos. Resolva rápido.",ref:["P0563"]}
+    :(v>12.6&&v<13)?{status:2,msg:v.toFixed(1)+" V — se medido com motor RODANDO, carga fraca (esperado 13,8–14,4 V).",ref:["P0562"]}
+    :{status:1,msg:v.toFixed(1)+" V — ok.",ref:[]}}
+];
+
+function analisarLiveData(dados){
+  const out=[];
+  for(const r of LIVE_RULES){
+    try{
+      const v=r.pega(dados||{});
+      if(v==null) continue;
+      const mostra=(v&&typeof v==="object")?`${v.s}% / ${v.l}%`:v;
+      out.push({regra:r.regra,valor:mostra,...r.medir(v)});
+    }catch{/* ignora dados inesperados */}
+  }
+  return out;
+}
+
+// ---------- 6. ANÁLISE COMBINADA (regras compartilhadas UI + CLI) ----------
+// "al" = grupos: TODOS os grupos precisam ter ao menos 1 código presente.
+const COMBO_RULES = [
+ {al:[["P0171"],["P0300"]], msg:"Magra + misfire: o vazamento de ar/mistura magra <strong>pode ser a causa</strong> da falha de ignição. Resolva P0171 primeiro e reavalie o P0300."},
+ {al:[["P0172"],["P0300","P0301","P0302","P0303","P0304"]], msg:"Rica + misfire: bico vazando no cilindro afetado é o principal suspeito — cheque velas molhadas / teste de vazamento dos bicos."},
+ {al:[["P0128"],["P0172","P0132"]], msg:"Motor frio demais (P0128) faz o ECU enriquecer a mistura — o termostato preso aberto <strong>explica</strong> o código de mistura rica. Troque o termostato antes de condenar sonda/bicos."},
+ {al:[["P0420","P0430"],["P0171","P0172"]], msg:"Mistura errada + catalisador: mistura crônica destrói o catalisador. Corrija P0171/P0172, rode e só depois avalie o catalisador."},
+ {al:[["P0299"],["P0401"]], msg:"Underboost + EGR: fuligem de EGR/intercooler obstruindo o sistema de carga é o padrão em diesel. Limpe EGR + intercooler + tubos."},
+ {al:[["P0011"],["P0300"]], msg:"VVT avançado + misfire: óleo velho/solenóide VVT. Troque óleo e filtro antes de qualquer peça."},
+ {al:[["P0100","P0101","P0102"],["P0171"]], msg:"MAF + magra: MAF sujo subestimando o ar é causa direta da magra. Limpe/teste o MAF antes de trocar bicos/sonda."},
+ {al:[["U0100","U0101","U0102","U0121","U0140","U0155","U1000"]], msg:"Códigos U (rede CAN): comece por fusíveis e alimentação dos módulos apontados — falha de rede gera cascata de códigos falsos em outros módulos."},
+ {min:4, msg:"Muitos códigos simultâneos: suspeite de <strong>bateria fraca / tensão baixa / terra ruim</strong> antes de qualquer peça. Teste bateria e carga (13,8–14,4 V)."},
+ {al:[["P0562"]], msg:"Tensão baixa: TODOS os outros códigos podem ser consequência. Resolva a carga primeiro."},
+ {al:[["P0700"]], msg:"P0700 é um aviso: o código real está no módulo do câmbio (P07xx). Leia o TCM com scanner compatível."}
+];
+
+// ---------- 7. PARSER FLEXÍVEL DE SCANNER (JSON) ----------
+// Aceita nomes em pt/en: vehicle/veiculo, dtcs/codes/codigos,
+// symptoms/sintomas, live_data/dados_ao_vivo, notes/observacoes.
+function parseScanner(obj){
+  obj=obj||{};
+  const v=obj.vehicle||obj.veiculo||{};
+  const first=keys=>{for(const k of keys){if(obj[k]!=null)return obj[k]}return undefined};
+  const raw=first(["dtcs","codes","codigos"])||[];
+  const codes=[...new Set((Array.isArray(raw)?raw.join(" "):String(raw)).toUpperCase().match(/\b[PCBU][0-3][0-9A-F]{3}\b/g)||[])];
+  const sym=first(["symptoms","sintomas"]);
+  return {
+    vehicle:{marca:v.make||v.marca||"",modelo:v.model||v.modelo||"",ano:v.year||v.ano||"",motor:v.engine||v.motor||""},
+    codes,
+    symptoms:Array.isArray(sym)?sym:(sym?[String(sym)]:[]),
+    live:first(["live_data","dados_ao_vivo"])||{},
+    notes:first(["notes","observacoes"])||""
+  };
+}
+
+// Export p/ Node (CLI: tools/diagnostico.mjs). No browser este bloco é ignorado
+// (aqui os consts viram escopo global compartilhado pelos scripts da página).
+if (typeof module!=="undefined" && module.exports){
+  module.exports={GENERIC_CODES,OEM_CODES,SYMPTOM_MAP,TIPS,LIVE_RULES,COMBO_RULES,parseScanner,analisarLiveData};
+}

@@ -1,0 +1,18 @@
+{
+  "vehicle": {
+    "make": "Jeep",
+    "model": "Cherokee XJ",
+    "year": 1996,
+    "engine": "4.0L"
+  },
+  "dtcs": ["P0300", "P0171"],
+  "symptoms": ["marcha lenta irregular", "falha de combustao em carga", "consumo alto"],
+  "live_data": {
+    "rpm_idle": 620,
+    "stft_b1_percent": 18.5,
+    "ltft_b1_percent": 12.0,
+    "maf_gps_idle": 2.1,
+    "coolant_temp_c": 88
+  },
+  "notes": "Falha pior com ar-condicionado ligado. Sem vazamentos visiveis aparentes."
+}

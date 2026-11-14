@@ -53,6 +53,15 @@
   .tag:hover{background:#1f6feb22}
   .chip{display:inline-block; background:#1f6feb22; color:var(--acc); border-radius:20px; padding:2px 10px; font-size:.78em; margin:2px}
   .symptom{display:flex; gap:8px; margin-top:10px}
+  .filebtn{display:inline-block;background:var(--panel2);color:var(--txt);border:1px solid var(--border);border-radius:8px;padding:10px 18px;font-weight:600;cursor:pointer;font-size:14px}
+  .filebtn:hover{filter:brightness(1.1)}
+  .livetab{width:100%;border-collapse:collapse;margin-top:8px;font-size:.9em}
+  .livetab td{border-bottom:1px dashed #2d333d;padding:7px 6px;vertical-align:top}
+  .livetab td:first-child{white-space:nowrap;color:var(--dim);width:190px}
+  .livetab .badl{background:#2d1113}
+  .livetab .warnl{color:var(--warn)}
+  .livetab .okl{color:var(--ok)}
+  .vchip{display:inline-block;background:var(--panel2);border:1px solid var(--border);border-radius:20px;padding:3px 12px;margin:2px;font-size:.88em}
   #printArea{display:none}
   footer{text-align:center; color:var(--dim); font-size:.78em; margin-top:24px; line-height:1.6}
   .sevline{font-size:.85em; margin-top:8px}
@@ -62,7 +71,7 @@
 <body>
 <header>
   <h1>🔧 Agente de Diagnóstico DTC</h1>
-  <p>Interpretação de códigos de scanner — consolidado de Dicatec · Simplo · Doutor-IE + fontes gratuitas</p>
+  <p>Códigos, JSON de scanner, dados ao vivo e manuais do veículo — consolidado de Dicatec · Simplo · Doutor-IE + fontes gratuitas</p>
 </header>
 
 <div class="wrap">
@@ -77,7 +86,20 @@
   </div>
 
   <div class="card noprint">
-    <h3 style="margin-top:0">2 — Busca por sintoma (sem código?)</h3>
+    <h3 style="margin-top:0">2 — Importar relatório JSON do scanner</h3>
+    <textarea id="jsonInput" style="min-height:110px;font-family:monospace;font-size:.9em" placeholder='Cole aqui o JSON exportado pelo scanner/app, ex.:&#10;{&#10;  "vehicle":{"make":"Jeep","model":"Cherokee XJ","year":1996,"engine":"4.0L"},&#10;  "dtcs":["P0300","P0171"],&#10;  "symptoms":["marcha lenta irregular","consumo alto"],&#10;  "live_data":{"rpm_idle":620,"stft_b1_percent":18.5,"ltft_b1_percent":12,"maf_gps_idle":2.1,"coolant_temp_c":88},&#10;  "notes":"Falha pior com ar-condicionado ligado"&#10;}'></textarea>
+    <div class="row" style="margin-top:10px">
+      <label class="filebtn">📂 Escolher arquivo…<input type="file" id="jsonFile" accept=".json,application/json" style="display:none" onchange="carregarArquivo(this.files[0])"></label>
+      <button onclick="processarJSON()">⚡ Analisar JSON completo</button>
+      <button class="sec" onclick="preencherExemplo()">Usar exemplo (Jeep)</button>
+    </div>
+    <div class="hint">Formato flexível (pt/en): vehicle/veiculo · dtcs/codes/codigos · symptoms/sintomas · live_data/dados_ao_vivo · notes/observacoes. O agente cruza códigos + sintomas + dados ao vivo (trims, temperatura, MAF, sonda, bateria) e sugere o manual do veículo.</div>
+  </div>
+
+  <div id="scannerOut"></div>
+
+  <div class="card noprint">
+    <h3 style="margin-top:0">3 — Busca por sintoma (sem código?)</h3>
     <div class="symptom">
       <input type="text" id="symInput" placeholder="Ex.: carro não parte, trepidação, luz de motor, consumo alto, câmbio patinando..." onkeydown="if(event.key==='Enter')searchSymptom()">
       <button onclick="searchSymptom()">🔎 Buscar</button>
@@ -94,7 +116,7 @@
       <input type="text" id="manualInput" placeholder="Marca e modelo, ex.: toyota corolla, fiat siena 2011, byd dolphin..." style="flex:1; min-width:220px" onkeydown="if(event.key==='Enter')openManual()">
       <button class="sec" onclick="openManual()">📖 Abrir manual (ManualPDF)</button>
     </div>
-    <div class="hint">O manual do proprietário traz o quadro de fusíveis/relés (essencial para códigos elétricos e U01xx), tabela de óleo/filtro, luzes do painel e intervalos de revisão. Mais de 5.300 manuais grátis.</div>
+    <div class="hint">O manual do proprietário traz o quadro de fusíveis/relés (essencial para códigos elétricos e U01xx), tabela de óleo/filtro, luzes do painel e intervalos de revisão. 7.000+ manuais grátis (carros, motos e barcos).</div>
     <h3 style="margin-top:10px">Esquemas e manuais de oficina (grátis, em ingl/espanhol)</h3>
     <div>
       <span class="tag" onclick="window.open('https://www.manualpdf.com.br/carros-barcos-motos/carros','_blank')">ManualPDF — manuais do proprietário (BR)</span>
@@ -134,6 +156,8 @@
 </footer>
 
 <script src="kb.js"></script>
+<script src="manuais/catalogo.js" onerror="this.remove()"></script>
+<script src="manuais/pdfs/indice-local.js" onerror="this.remove()"></script>
 <script>
 const KB = {...GENERIC_CODES, ...OEM_CODES};
 const sevName = {1:["Leve","s1","Pode esperar — sem risco imediato"],2:["Moderada","s2","Atenção — pode piorar ou gerar outros danos"],3:["Crítica","s3","Resolva IMEDIATAMENTE — risco de dano grave ou segurança"]};
@@ -184,21 +208,13 @@ function cardHTML(code, data, idx){
 }
 
 function combinedHTML(codes){
-  const s=new Set(); codes.forEach(c=>{const d=KB[c]; if(d) d.sym.forEach(x=>s.add(x))});
   const groups={}; codes.forEach(c=>{const d=KB[c]; if(d){(groups[d.s]=groups[d.s]||[]).push(c)}});
   const groupsHTML=Object.entries(groups).map(([g,list])=>`<div><span class="chip">${g}</span> ${list.join(", ")}</div>`).join("");
-  let analysis=[];
-  const has=(c)=>codes.includes(c);
-  if(has("P0171")&&has("P0300")) analysis.push("Magra + misfire: o vazamento de ar/mistura magra <strong>pode ser a causa</strong> da falha de ignição. Resolva P0171 primeiro e reavalie o P0300.");
-  if(has("P0172")&&(has("P0300")||/P030[1-4]/.test(codes.join()))) analysis.push("Rica + misfire: bico vazando no cilindro afetado é o principal suspeito — cheque velas molhadas / teste de vazamento dos bicos.");
-  if(has("P0128")&&(has("P0172")||has("P0132"))) analysis.push("Motor frio demais (P0128) faz o ECU enriquecer a mistura — o termostato preso aberto <strong>explica</strong> o código de mistura rica. Troque o termostato antes de trocar sonda/bicos.");
-  if((has("P0420")||has("P0430"))&&(has("P0171")||has("P0172"))) analysis.push("Mistura errada + catalisador: mistura crônica destrói o catalisador. Corrija P0171/P0172, rode e só depois avalie o catalisador.");
-  if(has("P0299")&&has("P0401")) analysis.push("Underboost + EGR: fuligem de EGR/intercooler obstruindo o sistema de carga é o padrão em diesel. Limpe EGR + intercooler + tubos.");
-  if(has("P0011")&&has("P0300")) analysis.push("VVT avançado + misfire: óleo velho/solenóide VVT. Troque óleo e filtro antes de qualquer peça.");
-  if(/U01/.test(codes.join())) analysis.push("Códigos U (rede CAN): comece por fusíveis e alimentação dos módulos apontados — falha de rede gera cascata de códigos falsos em outros módulos.");
-  if(codes.length>3) analysis.push("Muitos códigos simultâneos: suspeite de <strong>bateria fraca / tensão baixa / terra ruim</strong> antes de qualquer peça. Teste bateria e carga (13,8–14,4V).");
-  if(has("P0562")) analysis.push("Tensão baixa: TODOS os outros códigos podem ser consequência. Resolva a carga primeiro.");
-  if(has("P0700")) analysis.push("P0700 é um aviso: o código real está no módulo do câmbio (P07xx). Leia o TCM com scanner compatível.");
+  const analysis=[];
+  COMBO_RULES.forEach(r=>{
+    if(r.min){ if(codes.length>=r.min) analysis.push(r.msg); return; }
+    if(r.al.every(g=>g.some(c=>codes.includes(c)))) analysis.push(r.msg);
+  });
   if(!analysis.length) analysis.push("Códigos independentes — trate cada um pela ordem de severidade (críticos primeiro).");
   return `<div class="combined"><h2>🔗 Análise combinada dos códigos</h2>${groupsHTML}${analysis.map(a=>`<p style="margin-top:8px">• ${a}</p>`).join("")}</div>`;
 }
@@ -217,6 +233,7 @@ function diagnose(){
     <div style="margin-top:8px"><span class="sev ${s[1]}">Prioridade: ${s[0]}</span> <span class="hint">${s[2]}</span></div>
     ${combinedHTML(found)}
     ${found.map((c,i)=>cardHTML(c,KB[c],i)).join("")}
+    ${lastScanner?sugerirManual(lastScanner.vehicle.marca,lastScanner.vehicle.modelo,lastScanner.vehicle.ano):""}
     <div style="margin-top:12px" class="hint">Ordem de trabalho sugerida: 1) bateria/tensão → 2) códigos críticos → 3) causas de maior % → 4) re-ler códigos após correção.</div>
   </div>`;
   out.innerHTML=html;
@@ -250,6 +267,96 @@ function searchSymptom(){
     <div class="hint" style="margin-top:8px">Clique nos códigos acima para ver a interpretação completa (causas + roteiro de testes).</div>
   </div>`;
   out.scrollIntoView({behavior:"smooth"});
+}
+
+// ---------- Entrada JSON do scanner ----------
+let lastScanner=null;
+
+function preencherExemplo(){
+  document.getElementById('jsonInput').value=JSON.stringify({
+    vehicle:{make:"Jeep",model:"Cherokee XJ",year:1996,engine:"4.0L"},
+    dtcs:["P0300","P0171"],
+    symptoms:["marcha lenta irregular","falha de combustao em carga","consumo alto"],
+    live_data:{rpm_idle:620,stft_b1_percent:18.5,ltft_b1_percent:12.0,maf_gps_idle:2.1,coolant_temp_c:88},
+    notes:"Falha pior com ar-condicionado ligado. Sem vazamentos visiveis aparentes."
+  },null,1);
+}
+
+function carregarArquivo(f){
+  if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{document.getElementById('jsonInput').value=r.result;processarJSON()};
+  r.readAsText(f);
+}
+
+function addCode(c){
+  const i=document.getElementById('dtcInput');
+  i.value=(i.value+" "+c).trim();
+  diagnose();
+}
+
+function renderLiveHTML(live){
+  const obs=analisarLiveData(live||{});
+  if(!obs.length) return `<div class="hint">Nenhum PID reconhecido no live_data (aceitos: stft/ltft, rpm, temperatura, maf, sonda o2, tensão da bateria).</div>`;
+  const cls=o=>o.status===1?"okl":o.status===0?"badl":"warnl";
+  const icon=o=>o.status===1?"✓":o.status===0?"✗":"⚠";
+  return `<table class="livetab">${obs.map(o=>`<tr class="${cls(o)}"><td>${icon(o)} ${o.regra}</td><td><strong>${o.valor}</strong> — ${o.msg}${(o.ref||[]).length?" "+o.ref.map(r=>`<span class="chip" style="cursor:pointer" onclick="addCode('${r}')">${r}</span>`).join(""):""}</td></tr>`).join("")}</table>`;
+}
+
+function sugerirManual(marca,modelo,ano){
+  const C=window.CATALOG;
+  if(!C||!marca) return "";
+  const norm=s=>(s||"").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim();
+  let hit=null;
+  for(const cat of C.categorias){
+    const mb=cat.marcas.find(m=>m.slug===norm(marca)||norm(m.nome)===norm(marca));
+    if(!mb) continue;
+    const q=norm(modelo);
+    let mod=q?mb.modelos.find(x=>norm(x.nome).includes(q)||q.includes(norm(x.nome))):null;
+    if(!mod&&ano) mod=mb.modelos.find(x=>x.slug.includes(String(ano)));
+    hit={cat,marca:mb,modelo:mod};
+    break;
+  }
+  if(!hit) return "";
+  if(!hit.modelo){
+    return `<div class="hint" style="margin-top:10px">📖 Manual do proprietário: <a style="color:var(--acc)" href="https://www.manualpdf.com.br/carros-barcos-motos/${hit.cat.listar||hit.cat.slug}" target="_blank" rel="noopener">${hit.marca.nome} — ver manuais da marca ↗</a></div>`;
+  }
+  const mb=hit.marca, mod=hit.modelo;
+  const itens=(window.LOCAIS&&window.LOCAIS.itens)||[];
+  const loc=itens.find(l=>l.marca===mb.slug&&l.modelo===mod.slug);
+  const link=loc?`manuais/pdfs/${mb.slug}/${mod.slug}.pdf`:`https://www.manualpdf.com.br/${mb.slug}/${mod.slug}/manual`;
+  return `<div class="codecard ok">
+    <div class="codehead"><span class="dtc" style="font-size:1em">📖 Manual do proprietário</span><span class="sys">${hit.cat.nome}</span></div>
+    <div>${mb.nome} ${mod.nome}${loc?` — <strong style="color:var(--ok)">✔ LOCAL (${loc.paginas} páginas)</strong>`:""}</div>
+    <div class="hint">Fusíveis/relés (essencial p/ códigos elétricos e U01xx), óleo/filtro, luzes do painel e revisões: <a style="color:var(--acc)" href="${link}"${loc?"":' target="_blank" rel="noopener"'}>abrir ${loc?"PDF local":"online ↗"}</a>${loc?"":` — ou baixe offline: <code>node tools/baixar-manuais.mjs ${mb.slug}/${mod.slug}</code>`}</div>
+  </div>`;
+}
+
+function processarJSON(){
+  const out=document.getElementById('scannerOut');
+  const txt=document.getElementById('jsonInput').value.trim();
+  if(!txt){out.innerHTML=`<div class="card"><strong>Cole o JSON acima ou escolha um arquivo.</strong></div>`;return}
+  let obj;
+  try{obj=JSON.parse(txt)}
+  catch(e){out.innerHTML=`<div class="card" style="border-left:4px solid var(--crit)"><strong>JSON inválido:</strong> ${e.message}</div>`;return}
+  const sc=parseScanner(obj);
+  lastScanner=sc;
+  const v=sc.vehicle;
+  const vdesc=[v.marca,v.modelo,v.ano,v.motor].filter(Boolean).join(" · ")||"não informado";
+  out.innerHTML=`<div class="card">
+    <h3 style="margin-top:0">📄 Veículo e dados do scanner</h3>
+    <div style="margin-top:6px"><span class="vchip">🚗 ${vdesc}</span>${sc.symptoms.map(s=>`<span class="vchip">⚠ ${s}</span>`).join("")}</div>
+    <h3 style="margin-top:14px">Dados ao vivo</h3>
+    ${renderLiveHTML(sc.live)}
+    ${sc.notes?`<div class="hint" style="margin-top:10px">📝 Notas: ${sc.notes}</div>`:""}
+    ${sugerirManual(v.marca,v.modelo,v.ano)}
+  </div>`;
+  if(sc.codes.length){
+    document.getElementById('dtcInput').value=sc.codes.join(" ");
+    diagnose();
+  } else {
+    out.scrollIntoView({behavior:"smooth"});
+  }
 }
 </script>
 </body>
