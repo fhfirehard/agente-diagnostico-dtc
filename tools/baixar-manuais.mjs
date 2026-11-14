@@ -23,7 +23,7 @@
  * Retomada: páginas já baixadas são puladas; PDF completo também. Pode
  * interromper (Ctrl+C) e rodar de novo que continua de onde parou.
  */
-import { writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
@@ -139,6 +139,25 @@ function lerIndiceLocal() {
   return m;
 }
 
+// ---------------- limpeza: apagar pastas webp de manuais que já têm PDF ----------------
+if (args.includes("--limpar-webp")) {
+  const loc = lerIndiceLocal();
+  let n = 0, bytes = 0;
+  loc.forEach(v => {
+    if (!v.pdf) return;
+    const d = join(OUTDIR, v.marca, v.modelo);
+    if (existsSync(d)) {
+      try {
+        for (const f of readdirSync(d)) { try { bytes += statSync(join(d, f)).size; } catch { } }
+        rmSync(d, { recursive: true, force: true });
+        n++;
+      } catch { }
+    }
+  });
+  log(`✓ limpeza webp: ${n} pastas removidas · ${(bytes / 1048576).toFixed(0)} MB liberados`);
+  process.exit(0);
+}
+
 // ---------------- fila ----------------
 const cat = parseCatalogo();
 const fila = []; // {marca, marcaSlug, modelo, modeloSlug}
@@ -247,13 +266,19 @@ async function baixarManual(man, done, total, locaisMap) {
     catch (e) { log(`${tag} ⚠ PDF falhou: ${e.message}`); }
   } else if (sharp && existsSync(pdfPath)) pdfOk = true;
 
-  const pagsHtml = Array.from({ length: limite }, (_, k) =>
-    `<img src="pag-${String(k + 1).padStart(3, "0")}.webp" loading="lazy" style="width:100%;max-width:900px;display:block;margin:6px auto;background:#fff">`).join("");
-  writeFileSync(join(dir, "leitor.html"),
+  if (pdfOk) {
+    // PDF completo = entrega final. Apagar as páginas webp (economiza ~metade do disco).
+    try { rmSync(dir, { recursive: true, force: true }); } catch { }
+  } else {
+    // sem PDF (páginas incompletas/falha): mantém webp p/ retomada + leitor offline
+    const pagsHtml = Array.from({ length: limite }, (_, k) =>
+      `<img src="pag-${String(k + 1).padStart(3, "0")}.webp" loading="lazy" style="width:100%;max-width:900px;display:block;margin:6px auto;background:#fff">`).join("");
+    writeFileSync(join(dir, "leitor.html"),
 `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${man.marca} ${man.modelo} — manual (offline)</title>
 <style>body{background:#111;color:#eee;font-family:Arial;text-align:center;padding:10px}a{color:#58a6ff}</style></head>
-<body><h3>${man.marca} ${man.modelo}</h3><p>${limite} páginas · ${pdfOk ? `<a href="../${man.modeloSlug}.pdf">abrir/baixar PDF</a>` : "sem PDF"} · <a href="../..">← catálogo</a></p>
+<body><h3>${man.marca} ${man.modelo}</h3><p>${limite} páginas · sem PDF montado · <a href="../..">← catálogo</a></p>
 ${pagsHtml}</body></html>`);
+  }
 
   if (ok === limite || ok > 0) {
     locaisMap.set(man.marcaSlug + "/" + man.modeloSlug, { marca: man.marcaSlug, modelo: man.modeloSlug, nome: man.modelo, paginas: ok, total: limite, pdf: pdfOk });

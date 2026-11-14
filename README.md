@@ -82,11 +82,15 @@ node tools/baixar-manuais.mjs fiat/siena-2011        # um modelo
 node tools/baixar-manuais.mjs fiat volkswagen honda  # marcas inteiras
 node tools/baixar-manuais.mjs --tudo                 # TODOS (carros+motos+barcos)
 node tools/baixar-manuais.mjs --status               # progresso atual
+node tools/baixar-manuais.mjs --limpar-webp          # apaga pastas webp de manuais que já têm PDF
 ```
 
 Para cada manual: baixa as páginas em alta resolução, monta o **PDF real** em
-`manuais/pdfs/{marca}/{modelo}.pdf`, gera `leitor.html` offline e atualiza o
-índice do catálogo. **Retomável** — interrompa e rode de novo sem perder nada.
+`manuais/pdfs/{marca}/{modelo}.pdf` e atualiza o índice do catálogo. Assim que o
+PDF fica pronto, **as páginas webp são apagadas automaticamente** (o PDF é a
+entrega final — economiza ~metade do espaço em disco). Se o PDF falhar, as
+páginas ficam em disco com um `leitor.html` offline para retomada. **Retomável** —
+interrompa e rode de novo sem perder nada.
 
 > **Volume:** um manual ≈ 5–15 MB. Os 7.400 manuais ≈ 40–70 GB (dias de
 > download). A pasta `manuais/pdfs/` é ignorada pelo git.
