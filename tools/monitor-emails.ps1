@@ -63,15 +63,19 @@ function Get-Progresso {
   [pscustomobject]@{ manuais=$manuais; paginas=$paginas; bytes=$bytes; total=$total }
 }
 
-function Send-Mail($assunto, $mensagem){
+function Send-Mail($assunto, $campos){
+  $msgTexto = ($campos.GetEnumerator() | ForEach-Object { "{0}: {1}" -f $_.Key, $_.Value }) -join "`r`n"
   $body = @{
-    name     = "Monitor de Manuais"
-    message  = $mensagem
-    subject  = $assunto
-    _captcha = "false"
-  } | ConvertTo-Json
+    _captcha  = "false"
+    _template = "table"
+    _subject  = $assunto
+    subject   = $assunto
+    message   = $msgTexto
+  }
+  foreach ($k in $campos.Keys) { if (-not $body.ContainsKey($k)) { $body[$k] = $campos[$k] } }
+  $json = $body | ConvertTo-Json
   try {
-    $r = Invoke-RestMethod -Uri ("https://formsubmit.co/ajax/" + $Destino) -Method Post -ContentType "application/json" -Body $body `
+    $r = Invoke-RestMethod -Uri ("https://formsubmit.co/ajax/" + $Destino) -Method Post -ContentType "application/json; charset=utf-8" -Body $json `
       -Headers @{ Origin = ($Origin -replace '/[^/]*$',''); Referer = $Origin } -TimeoutSec 40
     $ok = ($r.success -eq "true") -or ($r.success -eq $true)
     if ($ok) {
@@ -100,24 +104,35 @@ function Fmt-Horas($h){
 
 # ---------------- histórico / ritmo ----------------
 $hist = @()
-if (Test-Path $StateF) { try { $hist = @(Get-Content $StateF -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { $hist = @() } }
+if (Test-Path $StateF) {
+  try {
+    $carregado = Get-Content $StateF -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($s in @($carregado)) {
+      if ($s -is [array]) { $s = $s[0] }
+      if ($null -eq $s -or $null -eq $s.ts) { continue }
+      $ts = $null
+      try {
+        $ts = if ($s.ts -is [datetime]) { $s.ts } else { [datetime]::Parse([string]$s.ts, [System.Globalization.CultureInfo]::InvariantCulture) }
+      } catch { continue }
+      $hist += [pscustomobject]@{ ts = $ts; manuais = [int]$s.manuais; paginas = [int]$s.paginas; bytes = [long]$s.bytes }
+    }
+  } catch { $hist = @() }
+}
 $p = Get-Progresso
 if ($p.total -le 0) { Log "✗ total de manuais = 0 (catálogo ausente?)"; exit 1 }
 
 $agora  = Get-Date
-$amostra = [pscustomobject]@{ ts = $agora.ToString("o"); manuais = $p.manuais; paginas = $p.paginas; bytes = $p.bytes }
-$hist = @($hist + $amostra) | Select-Object -Last 48
-$hist | ConvertTo-Json -Depth 3 | Set-Content $StateF -Encoding UTF8
+$hist = @($hist + [pscustomobject]@{ ts = $agora; manuais = $p.manuais; paginas = $p.paginas; bytes = $p.bytes }) | Select-Object -Last 48
+ConvertTo-Json -InputObject @($hist) -Depth 3 | Set-Content $StateF -Encoding UTF8
 
 # amostra de referência: a mais antiga dentro de ~1h15 (ou a mais antiga que existir)
 $ref = $null
 foreach ($s in $hist) {
-  $ts = [datetime]$s.ts
-  if (($agora - $ts).TotalMinutes -ge 60) { $ref = $s; break }   # primeira fora da janela
+  if (($agora - $s.ts).TotalMinutes -ge 60) { $ref = $s; break }   # primeira fora da janela
 }
 if (-not $ref -and $hist.Count -gt 1) { $ref = $hist[0] }
 $dtH = 0
-if ($ref) { $dtH = (($agora - [datetime]$ref.ts).TotalMinutes) / 60.0 }
+if ($ref) { $dtH = (($agora - $ref.ts).TotalMinutes) / 60.0 }
 $ritmoM = 0; $ritmoP = 0
 if ($ref -and $dtH -gt 0.05) {
   $ritmoM = [math]::Max(0, ($p.manuais - [int]$ref.manuais)) / $dtH
@@ -136,34 +151,31 @@ $flagF = Join-Path $PSScriptRoot "monitor-flags.json"
 $flags = @{ alertaParado = $false; concluido = $false }
 if (Test-Path $flagF) { try { $flags = Get-Content $flagF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { } }
 
-function Monta-Mensagem($tipo){
-  $linhas = @()
-  $linhas += "RELATORIO DE DOWNLOAD DE MANUAIS (agente-diagnostico-dtc)"
-  $linhas += "Tipo: $tipo"
-  $linhas += ""
-  $linhas += ("Progresso: {0} de {1} manuais ({2}%)" -f $p.manuais, $p.total, $pct)
-  $linhas += ("Paginas baixadas: {0:N0}" -f $p.paginas)
-  $linhas += ("Volume em disco: {0} GB" -f $gb)
+function Dados-Relatorio($tipo){
+  $o = [ordered]@{}
+  $o["Relatório"] = "Download de manuais — agente-diagnostico-dtc"
+  $o["Tipo"] = $tipo
+  $o["Progresso"] = ("{0} de {1} manuais ({2}%)" -f $p.manuais, $p.total, $pct)
+  $o["Páginas baixadas"] = ("{0:N0}" -f $p.paginas)
+  $o["Volume em disco"] = ("{0} GB" -f $gb)
   if ($ritmoM -gt 0.05) {
-    $linhas += ("Ritmo (ultima janela ~1h): {0:N0} manuais/h · {1:N0} paginas/h" -f $ritmoM, $ritmoP)
+    $o["Ritmo (janela ~1h)"] = ("{0:N0} manuais/h · {1:N0} páginas/h" -f $ritmoM, $ritmoP)
   } else {
-    $linhas += "Ritmo: ainda sem amostra de 1 hora completa (primeiro ciclo)"
+    $o["Ritmo (janela ~1h)"] = "sem amostra de 1h completa (primeiro ciclo)"
   }
   if ($etaH -gt 0) {
-    $previsao = $agora.AddHours($etaH)
-    $linhas += ("Estimativa para terminar: {0} (previsao {1:dd/MM HH:mm})" -f (Fmt-Horas $etaH), $previsao)
+    $o["Estimativa p/ terminar"] = ("{0} (previsão {1:dd/MM HH:mm})" -f (Fmt-Horas $etaH), $agora.AddHours($etaH))
   } else {
-    $linhas += "Estimativa para terminar: calculando (aguardando amostra de 1h)"
+    $o["Estimativa p/ terminar"] = "calculando (aguardando amostra de 1h)"
   }
-  $linhas += ""
-  $linhas += ("Processo de download ativo: {0}" -f ($(if ($nodeOn) { "sim" } else { "NAO" })))
-  return ($linhas -join "`r`n")
+  $o["Processo de download ativo"] = $(if ($nodeOn) { "sim" } else { "NÃO" })
+  return $o
 }
 
 if ($terminou) {
   if (-not $flags.concluido) {
-    $msg = Monta-Mensagem "CONCLUSAO"
-    Send-Mail ("[Manuais] CONCLUIDO: {0}/{1} manuais" -f $p.manuais, $p.total) $msg | Out-Null
+    $ass = "[Manuais] CONCLUÍDO: {0}/{1} manuais" -f $p.manuais, $p.total
+    Send-Mail $ass (Dados-Relatorio "CONCLUSÃO") | Out-Null
     $flags.concluido = $true
     $flags | ConvertTo-Json | Set-Content $flagF -Encoding UTF8
     schtasks /Delete /TN "Monitor-Manuais" /F 2>$null | Out-Null
@@ -178,7 +190,7 @@ if ($terminou) {
 if (-not $nodeOn) {
   if (-not $flags.alertaParado) {
     $ass = "[Manuais] ALERTA: download PAROU em {0}/{1}" -f $p.manuais, $p.total
-    Send-Mail $ass (Monta-Mensagem "ALERTA - PROCESSO PARADO") | Out-Null
+    Send-Mail $ass (Dados-Relatorio "ALERTA — PROCESSO PARADO") | Out-Null
     $flags.alertaParado = $true
     $flags | ConvertTo-Json | Set-Content $flagF -Encoding UTF8
     Log "⚠ processo node não encontrado — alerta enviado"
@@ -194,7 +206,7 @@ if (-not $nodeOn) {
 # ---------------- relatório horário normal ----------------
 $assunto = ("[Manuais] {0}/{1} ({2}%) · {3} GB" -f $p.manuais, $p.total, $pct, $gb)
 if ($etaH -gt 0) { $assunto += " · falta " + (Fmt-Horas $etaH) }
-if (Send-Mail $assunto (Monta-Mensagem "RELATORIO HORARIO")) {
+if (Send-Mail $assunto (Dados-Relatorio "RELATÓRIO HORÁRIO")) {
   Log ("relatório horário enviado: {0}" -f $assunto)
 } else {
   Log ("relatório NÃO entregue (ativação pendente?): {0}" -f $assunto)
