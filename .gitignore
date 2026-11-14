@@ -4,6 +4,12 @@ node_modules/
 # PDFs e páginas baixadas (pesam GB — descomente para versionar)
 manuais/pdfs/
 
+# Monitor de e-mails: config/e-mails/logs locais da máquina
+tools/monitor-emails.local.json
+tools/monitor-state.json
+tools/monitor-flags.json
+tools/monitor-emails.log
+
 # Sistema / editor
 Thumbs.db
 .DS_Store

@@ -148,6 +148,31 @@ Os dois repos anteriores tinham abordagens complementares — este unifica tudo:
 - ✨ Sugestão automática do manual do veículo no relatório (detecta marca/modelo,
   aponta PDF local ou link para baixar)
 
+## Monitor de e-mails (opcional, máquina local)
+
+O script `tools/monitor-emails.ps1` envia um relatório por e-mail **a cada hora**
+(total baixado, páginas, volume em disco, ritmo e **estimativa de término**) e um
+e-mail final quando o download dos 7.399 manuais conclui. Se o processo morrer
+sem terminar, envia alerta.
+
+```powershell
+# 1) configurar destinatário (arquivo fora do git)
+#    tools/monitor-emails.local.json → { "destino": "voce@dominio", "origem": "https://<pages>" }
+
+# 2) ativação única do FormSubmit: rode o script uma vez e clique no link
+#    do e-mail "Activate Form" que chega na caixa do destinatário
+powershell -ExecutionPolicy Bypass -File tools/monitor-emails.ps1
+
+# 3) agendar execução horária
+schtasks /Create /TN "Monitor-Manuais" ^
+  /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"<caminho>\tools\monitor-emails.ps1\"" ^
+  /SC HOURLY /F
+```
+
+Ao concluir, o script envia o e-mail de conclusão e remove a tarefa agendada.
+O envio usa o relé gratuito FormSubmit (sem credenciais); os e-mails chegam
+remetidos por formsubmit.co.
+
 ## Fontes do conhecimento
 
 Práticas de diagnóstico consolidadas das plataformas **Dicatec** / **Simplo** /
