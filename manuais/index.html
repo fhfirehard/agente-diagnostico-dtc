@@ -5,13 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Catálogo de Manuais do Proprietário</title>
 <style>
-  :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--border:#2d333d;--txt:#e6edf3;--dim:#9aa7b5;--acc:#58a6ff;--pink:#bc8cff}
+  :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--border:#2d333d;--txt:#e6edf3;--dim:#9aa7b5;--acc:#58a6ff;--ok:#3fb950}
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;padding:20px}
-  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px}
   h1{font-size:1.35em;color:var(--acc)}
   .meta{color:var(--dim);font-size:.82em}
   a.voltar{color:var(--acc);text-decoration:none;font-size:.9em}
+  .cats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .cat{background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:6px 16px;cursor:pointer;font-size:.9em}
+  .cat.ativa{background:#1f6feb33;border-color:var(--acc);color:var(--acc);font-weight:700}
+  .cat .n{color:var(--dim);font-size:.85em}
   .layout{display:grid;grid-template-columns:230px 1fr;gap:16px;max-width:1200px;margin:0 auto}
   @media(max-width:760px){.layout{grid-template-columns:1fr}}
   .brandbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;position:sticky;top:14px;max-height:85vh;overflow:auto}
@@ -28,9 +32,10 @@
   .model b{display:block;font-weight:600}
   .model span{color:var(--dim);font-size:.78em}
   .model.local{border-color:#2ea043;background:#12261a}
-  .model.local b{color:#3fb950}
+  .model.local b{color:var(--ok)}
   .empty{color:var(--dim);text-align:center;padding:30px}
   .hint{color:var(--dim);font-size:.8em;margin-top:10px}
+  code{background:var(--panel2);padding:1px 6px;border-radius:4px}
 </style>
 </head>
 <body>
@@ -42,14 +47,16 @@
   <a class="voltar" href="../index.html">← voltar ao Agente de Diagnóstico</a>
 </header>
 
+<div class="cats noprint" id="catTabs"></div>
+
 <div class="layout">
   <div class="brandbox noprint" id="brandList"></div>
   <div class="panel">
     <input type="text" id="q" placeholder="🔎 Filtrar modelo nesta marca (ou digite marca+modelo p/ buscar tudo)..." oninput="render()">
     <div class="grid" id="models"></div>
     <div class="empty" id="empty" style="display:none">Nenhum modelo encontrado.</div>
-    <div class="hint">Cada link abre a página do manual no site de origem (ManualPDF.com.br) para visualizar/download do PDF. Manuais marcados como <span style="color:#3fb950">✔ LOCAL</span> já estão baixados — abrem o PDF direto da pasta <b>manuais/pdfs/</b>, funcionam offline.<br>
-    Baixar mais: <code>node tools/baixar-manuais.mjs fiat volkswagen byd</code> (marca inteira) ou <code>node tools/baixar-manuais.mjs fiat/uno-2011</code> (modelo específico). Fusíveis, óleo/filtro, revisões e luzes do painel ficam nesses manuais — use junto com o agente de diagnóstico.</div>
+    <div class="hint">Manuais marcados como <span style="color:var(--ok)">✔ LOCAL</span> já estão baixados — abrem o PDF direto da pasta <b>manuais/pdfs/</b>, funcionam offline. Os demais abrem no site de origem (ManualPDF.com.br).<br>
+    Baixar mais: <code>node tools/baixar-manuais.mjs fiat volkswagen honda</code> (marcas) · <code>fiat/uno-2011</code> (modelo) · <code>--tudo</code> (todos carros+motos+barcos, ~2 dias rodando). Fusíveis, óleo/filtro, revisões e luzes do painel ficam nesses manuais — use junto com o agente de diagnóstico.</div>
   </div>
 </div>
 
@@ -60,19 +67,36 @@ const C = window.CATALOG;
 const LOCAIS = (window.LOCAIS && window.LOCAIS.itens) || [];
 const localMap = {};
 LOCAIS.forEach(l => localMap[l.marca + "/" + l.modelo] = l);
-document.getElementById('meta').textContent = `${C.marcas.length} marcas · ${C.marcas.reduce((s,m)=>s+m.modelos.length,0)} manuais · ${LOCAIS.length} baixados localmente (PDF) · atualizado em ${C.gerado_em}`;
+const totalManuais = C.categorias.reduce((s,c)=>s+c.marcas.reduce((x,m)=>x+m.modelos.length,0),0);
+document.getElementById('meta').textContent = `${totalManuais} manuais · ${LOCAIS.length} baixados localmente (PDF) · atualizado em ${C.gerado_em}`;
 
+let catAtiva = C.categorias[0].slug;
 let marcaAtiva = "todas";
 
+const catTabs = document.getElementById('catTabs');
+function buildCats(){
+  catTabs.innerHTML = "";
+  C.categorias.forEach(c=>{
+    const n = c.marcas.reduce((s,m)=>s+m.modelos.length,0);
+    const d = document.createElement('div');
+    d.className = 'cat' + (catAtiva===c.slug ? ' ativa' : '');
+    d.innerHTML = `${c.nome} <span class="n">${n}</span>`;
+    d.onclick = ()=>{catAtiva=c.slug;marcaAtiva='todas';buildCats();buildBrands();render()};
+    catTabs.appendChild(d);
+  });
+}
+
 const brandBox = document.getElementById('brandList');
+function marcaDaCategoria(){ return C.categorias.find(c=>c.slug===catAtiva).marcas; }
 function buildBrands(){
   brandBox.innerHTML = "";
   const todas = document.createElement('div');
   todas.className = 'brand todas' + (marcaAtiva==='todas' ? ' ativa' : '');
-  todas.innerHTML = `Todas as marcas <span class="n">${C.marcas.reduce((s,m)=>s+m.modelos.length,0)}</span>`;
+  const nTodas = marcaDaCategoria().reduce((s,m)=>s+m.modelos.length,0);
+  todas.innerHTML = `Todas as marcas <span class="n">${nTodas}</span>`;
   todas.onclick = ()=>{marcaAtiva='todas';buildBrands();render()};
   brandBox.appendChild(todas);
-  C.marcas.forEach(b=>{
+  marcaDaCategoria().forEach(b=>{
     const d = document.createElement('div');
     d.className = 'brand' + (marcaAtiva===b.slug ? ' ativa' : '');
     d.innerHTML = `<span>${b.nome}</span><span class="n">${b.modelos.length}</span>`;
@@ -87,22 +111,20 @@ function render(){
   const empty = document.getElementById('empty');
   box.innerHTML = "";
   let itens = [];
+  const marcas = marcaAtiva==='todas' ? marcaDaCategoria() : [marcaDaCategoria().find(m=>m.slug===marcaAtiva)].filter(Boolean);
 
   if (marcaAtiva === 'todas' && q) {
-    // busca global: marca + modelo
-    C.marcas.forEach(b=>{
+    C.categorias.find(c=>c.slug===catAtiva).marcas.forEach(b=>{
       const bn = b.nome.toLowerCase();
       if (bn.includes(q)) itens.push(...b.modelos.map(m=>({b,m})));
       b.modelos.forEach(m=>{ if(m.nome.toLowerCase().includes(q)) itens.push({b,m}) });
     });
-  } else if (marcaAtiva === 'todas') {
-    C.marcas.forEach(b=>itens.push(...b.modelos.map(m=>({b,m}))));
   } else {
-    const b = C.marcas.find(x=>x.slug===marcaAtiva);
-    itens = (q ? b.modelos.filter(m=>m.nome.toLowerCase().includes(q)) : b.modelos).map(m=>({b,m}));
+    marcas.forEach(b=>{
+      itens.push(...(q ? b.modelos.filter(m=>m.nome.toLowerCase().includes(q)) : b.modelos).map(m=>({b,m})));
+    });
   }
 
-  // dedup (busca global pode duplicar)
   const seen = new Set();
   itens = itens.filter(({b,m})=>{const k=b.slug+'/'+m.slug; if(seen.has(k))return false; seen.add(k); return true});
 
@@ -113,7 +135,7 @@ function render(){
     a.className='model';
     if (local) {
       a.href = `pdfs/${b.slug}/${m.slug}.pdf`;
-      a.innerHTML = `<b>${m.nome}</b><span>✔ LOCAL · ${local.paginas} páginas · ${local.pdf?'PDF':''} ${local.pdf?'·':''} abrir direto ↗</span>`;
+      a.innerHTML = `<b>${m.nome}</b><span>✔ LOCAL · ${local.paginas} páginas${local.pdf?' · PDF':''} · abrir direto ↗</span>`;
       a.classList.add('local');
     } else {
       a.href = `https://www.manualpdf.com.br/${b.slug}/${m.slug}/manual`; a.target="_blank"; a.rel="noopener";
@@ -123,7 +145,7 @@ function render(){
   });
 }
 
-buildBrands(); render();
+buildCats(); buildBrands(); render();
 </script>
 </body>
 </html>
