@@ -157,7 +157,8 @@ Os dois repos anteriores tinham abordagens complementares — este unifica tudo:
 O script `tools/monitor-emails.ps1` envia um relatório por e-mail **a cada hora**
 (total baixado, páginas, volume em disco, ritmo e **estimativa de término**) e um
 e-mail final quando o download dos 7.399 manuais conclui. Se o processo morrer
-sem terminar, envia alerta.
+sem terminar, envia alerta, e também avisa se o disco C: ficar com menos de
+15 GB livres (o relatório traz a projeção de espaço no fim do download).
 
 ```powershell
 # 1) configurar destinatário (arquivo fora do git)

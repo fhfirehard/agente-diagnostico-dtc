@@ -7,6 +7,8 @@
 #   - Envia e-mail com o resumo
 #   - Quando TERMINA: envia e-mail de conclusão e apaga a tarefa
 #   - Se o processo node morrer sem terminar: envia alerta
+#   - Alerta de disco: avisa se ficar menos de 15 GB livres
+#   - Os PDFs permanecem em manuais/pdfs/ (sem backup na nuvem)
 #
 # Destinatário/origem: tools/monitor-emails.local.json (não versionado)
 # Envio: FormSubmit (https://formsubmit.co) — precisa de ativação única
@@ -141,14 +143,16 @@ if ($ref -and $dtH -gt 0.05) {
 $falta = [math]::Max(0, $p.total - $p.manuais)
 $etaH = if ($ritmoM -gt 0.05) { $falta / $ritmoM } else { -1 }
 $pct = if ($p.total -gt 0) { [math]::Round(100.0 * $p.manuais / $p.total, 1) } else { 0 }
-$gb  = [math]::Round($p.bytes / 1GB, 2)
+$gb   = [math]::Round($p.bytes / 1GB, 2)
+$livre = [math]::Round((Get-PSDrive C).Free / 1GB, 1)
+$projGB = if ($p.manuais -gt 0) { [math]::Round(($p.bytes / $p.manuais) * $p.total / 1GB, 0) } else { 0 }
 
 $nodeOn = ((Get-Process node -ErrorAction SilentlyContinue | Measure-Object).Count) -gt 0
 $terminou = ($p.manuais -ge $p.total)
 
 # ---------------- estados em um arquivo de flags ----------------
 $flagF = Join-Path $PSScriptRoot "monitor-flags.json"
-$flags = @{ alertaParado = $false; concluido = $false }
+$flags = [pscustomobject]@{ alertaParado = $false; concluido = $false }
 if (Test-Path $flagF) { try { $flags = Get-Content $flagF -Raw -Encoding UTF8 | ConvertFrom-Json } catch { } }
 
 function Dados-Relatorio($tipo){
@@ -158,6 +162,8 @@ function Dados-Relatorio($tipo){
   $o["Progresso"] = ("{0} de {1} manuais ({2}%)" -f $p.manuais, $p.total, $pct)
   $o["Páginas baixadas"] = ("{0:N0}" -f $p.paginas)
   $o["Volume em disco"] = ("{0} GB" -f $gb)
+  $o["Disco livre"] = ("{0} GB" -f $livre)
+  if ($projGB -gt 0) { $o["Projeção total estimada"] = ("~{0} GB no fim do download" -f $projGB) }
   if ($ritmoM -gt 0.05) {
     $o["Ritmo (janela ~1h)"] = ("{0:N0} manuais/h · {1:N0} páginas/h" -f $ritmoM, $ritmoP)
   } else {
@@ -170,6 +176,21 @@ function Dados-Relatorio($tipo){
   }
   $o["Processo de download ativo"] = $(if ($nodeOn) { "sim" } else { "NÃO" })
   return $o
+}
+
+# ---------------- alerta de disco baixo (< 15 GB livres) ----------------
+if ($livre -lt 15) {
+  if (-not $flags.alertaDisco) {
+    $ass = "[Manuais] ALERTA: disco quase cheio ({0} GB livres)" -f $livre
+    Send-Mail $ass (Dados-Relatorio "ALERTA — ESPAÇO EM DISCO BAIXO") | Out-Null
+    $flags | Add-Member -MemberType NoteProperty -Name alertaDisco -Value $true -Force
+    $flags | ConvertTo-Json | Set-Content $flagF -Encoding UTF8
+    Log ("⚠ disco baixo ({0} GB livres) — alerta enviado" -f $livre)
+  }
+} elseif (($flags.PSObject.Properties.Name -contains "alertaDisco") -and $flags.alertaDisco) {
+  $flags.alertaDisco = $false
+  $flags | ConvertTo-Json | Set-Content $flagF -Encoding UTF8
+  Log ("✓ disco recuperado ({0} GB livres)" -f $livre)
 }
 
 if ($terminou) {
