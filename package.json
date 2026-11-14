@@ -1,0 +1,14 @@
+﻿{
+    "name":  "agente-diagnostico-dtc",
+    "version":  "1.0.0",
+    "description":  "Agente de diagnóstico DTC offline + catálogo de manuais do proprietário com download de PDF",
+    "scripts":  {
+                    "catalogo":  "node tools/gerar-catalogo.mjs",
+                    "baixar":  "node tools/baixar-manuais.mjs"
+                },
+    "license":  "MIT",
+    "type":  "commonjs",
+    "dependencies":  {
+                         "sharp":  "^0.35.5"
+                     }
+}

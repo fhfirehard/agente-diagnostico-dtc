@@ -1,0 +1,10 @@
+# Dependências
+node_modules/
+
+# PDFs e páginas baixadas (pesam GB — descomente para versionar)
+manuais/pdfs/
+
+# Sistema / editor
+Thumbs.db
+.DS_Store
+*.log

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agente de Diagnóstico DTC — Interpretação de Scanner</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2d333d;
+    --txt:#e6edf3; --dim:#9aa7b5; --acc:#58a6ff; --ok:#3fb950; --warn:#d29922;
+    --bad:#f85149; --crit:#da3633; --pink:#bc8cff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--txt); font:15px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif; padding:20px}
+  header{text-align:center; margin-bottom:22px}
+  header h1{font-size:1.6em; color:var(--acc)}
+  header p{color:var(--dim); font-size:.9em; margin-top:4px}
+  .wrap{max-width:1100px; margin:0 auto; display:grid; gap:18px}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px}
+  .row{display:flex; gap:10px; flex-wrap:wrap}
+  textarea,input[type=text]{background:var(--panel2); border:1px solid var(--border); border-radius:8px; color:var(--txt); padding:10px 12px; font-size:15px; width:100%}
+  textarea{min-height:70px; resize:vertical}
+  button{background:var(--acc); color:#0d1117; border:0; border-radius:8px; padding:10px 18px; font-weight:600; cursor:pointer; font-size:14px}
+  button.sec{background:var(--panel2); color:var(--txt); border:1px solid var(--border)}
+  button:hover{filter:brightness(1.1)}
+  .hint{color:var(--dim); font-size:.85em; margin-top:6px}
+  .codecard{background:var(--panel2); border:1px solid var(--border); border-left:4px solid var(--acc); border-radius:8px; padding:14px; margin-top:12px}
+  .codecard.crit{border-left-color:var(--crit)}
+  .codecard.warn{border-left-color:var(--warn)}
+  .codecard.ok{border-left-color:var(--ok)}
+  .codehead{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px}
+  .dtc{font:700 1.15em monospace; color:var(--pink)}
+  .sev{font-size:.75em; padding:2px 10px; border-radius:20px; font-weight:700}
+  .s1{background:#238636; color:#fff} .s2{background:#9e6a03; color:#fff} .s3{background:#da3633; color:#fff}
+  .sys{background:var(--panel); border:1px solid var(--border); padding:2px 10px; border-radius:20px; font-size:.78em; color:var(--dim)}
+  h3{font-size:.85em; text-transform:uppercase; letter-spacing:.5px; color:var(--acc); margin:12px 0 6px}
+  .sym{color:var(--dim); font-style:italic; font-size:.9em}
+  .cause{margin:7px 0}
+  .barbg{background:#0d1117; border:1px solid var(--border); border-radius:6px; height:22px; position:relative; overflow:hidden}
+  .bar{height:100%; background:linear-gradient(90deg,#1f6feb,#58a6ff); opacity:.35; position:absolute; inset:0}
+  .barlabel{position:relative; z-index:1; font-size:.88em; padding:2px 8px; display:flex; justify-content:space-between}
+  .pct{color:var(--acc); font-weight:700; font-size:.8em}
+  ul.tests{list-style:none; margin-top:4px}
+  ul.tests li{padding:5px 0; border-bottom:1px dashed #2d333d; cursor:pointer; font-size:.93em}
+  ul.tests li::before{content:"☐ "; color:var(--acc); font-size:1.1em}
+  ul.tests li.done{color:var(--ok); text-decoration:line-through; opacity:.75}
+  ul.tests li.done::before{content:"☑ "}
+  .combined{background:#0d2137; border:1px solid #1f6feb; border-radius:8px; padding:12px 14px; margin-top:12px}
+  .combined h2{font-size:.95em; color:var(--acc); margin-bottom:6px}
+  .tips li{padding:5px 0; font-size:.9em; color:var(--dim); border-bottom:1px dashed #2d333d}
+  .tips li::before{content:"💡 "}
+  .tag{display:inline-block; background:var(--panel2); border:1px solid var(--border); color:var(--acc); border-radius:6px; padding:3px 10px; margin:3px; cursor:pointer; font-size:.88em}
+  .tag:hover{background:#1f6feb22}
+  .chip{display:inline-block; background:#1f6feb22; color:var(--acc); border-radius:20px; padding:2px 10px; font-size:.78em; margin:2px}
+  .symptom{display:flex; gap:8px; margin-top:10px}
+  #printArea{display:none}
+  footer{text-align:center; color:var(--dim); font-size:.78em; margin-top:24px; line-height:1.6}
+  .sevline{font-size:.85em; margin-top:8px}
+  @media print{ body{background:#fff; color:#000} .noprint{display:none} #printArea{display:block} .card{border-color:#ccc} }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔧 Agente de Diagnóstico DTC</h1>
+  <p>Interpretação de códigos de scanner — consolidado de Dicatec · Simplo · Doutor-IE + fontes gratuitas</p>
+</header>
+
+<div class="wrap">
+  <div class="card noprint">
+    <h3 style="margin-top:0">1 — Códigos do scanner</h3>
+    <textarea id="dtcInput" placeholder="Cole ou digite os códigos, ex.:&#10;P0171 P0300&#10;ou:&#10;P0171&#10;P0300&#10;U0100"></textarea>
+    <div class="hint">Aceita vários códigos separados por espaço, vírgula ou linha. Aceita P, B, C, U + Códigos de fabricante (P1xxx).</div>
+    <div class="row" style="margin-top:10px">
+      <button onclick="diagnose()">⚡ Interpretar códigos</button>
+      <button class="sec" onclick="document.getElementById('dtcInput').value=''; document.getElementById('out').innerHTML=''">Limpar</button>
+    </div>
+  </div>
+
+  <div class="card noprint">
+    <h3 style="margin-top:0">2 — Busca por sintoma (sem código?)</h3>
+    <div class="symptom">
+      <input type="text" id="symInput" placeholder="Ex.: carro não parte, trepidação, luz de motor, consumo alto, câmbio patinando..." onkeydown="if(event.key==='Enter')searchSymptom()">
+      <button onclick="searchSymptom()">🔎 Buscar</button>
+    </div>
+    <div style="margin-top:10px" id="quickTags"></div>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="card noprint">
+    <h3 style="margin-top:0">📚 Fontes de consulta de manuais</h3>
+    <h3 style="margin-top:8px">Manual do proprietário (grátis)</h3>
+    <div class="row">
+      <input type="text" id="manualInput" placeholder="Marca e modelo, ex.: toyota corolla, fiat siena 2011, byd dolphin..." style="flex:1; min-width:220px" onkeydown="if(event.key==='Enter')openManual()">
+      <button class="sec" onclick="openManual()">📖 Abrir manual (ManualPDF)</button>
+    </div>
+    <div class="hint">O manual do proprietário traz o quadro de fusíveis/relés (essencial para códigos elétricos e U01xx), tabela de óleo/filtro, luzes do painel e intervalos de revisão. Mais de 5.300 manuais grátis.</div>
+    <h3 style="margin-top:10px">Esquemas e manuais de oficina (grátis, em ingl/espanhol)</h3>
+    <div>
+      <span class="tag" onclick="window.open('https://www.manualpdf.com.br/carros-barcos-motos/carros','_blank')">ManualPDF — manuais do proprietário (BR)</span>
+      <span class="tag" onclick="window.open('https://esquema-fusiveis.com/','_blank')">Esquema-Fusíveis — quadro de fusíveis</span>
+      <span class="tag" onclick="window.open('https://workshop-manuals.com/','_blank')">Workshop-Manuals — manuais de oficina</span>
+      <span class="tag" onclick="window.open('https://alloemmanuals.com/wiring','_blank')">AllOEMManuals — diagramas elétricos</span>
+      <span class="tag" onclick="window.open('https://www.autozone.com/diy/repair-guides','_blank')">AutoZone Repair Guides</span>
+      <span class="tag" onclick="window.open('https://toyota-tech.eu/','_blank')">Toyota Techinfo (oficial)</span>
+      <span class="tag" onclick="window.open('https://www.hyundai-techinfo.com/','_blank')">Hyundai TechInfo (oficial)</span>
+      <span class="tag" onclick="window.open('https://techinfo.honda.com/','_blank')">Honda ServiceExpress (oficial)</span>
+    </div>
+    <h3 style="margin-top:10px">Plataformas profissionais pagas (referência em PT-BR)</h3>
+    <div>
+      <span class="tag" onclick="window.open('https://www.dicatec.com.br/','_blank')">Dicatec — assinatura anual</span>
+      <span class="tag" onclick="window.open('https://www.simplusbr.com/','_blank')">Simplo — compra única</span>
+      <span class="tag" onclick="window.open('https://doutorie.com.br/','_blank')">Doutor-IE — assinatura (tem test drive grátis)</span>
+    </div>
+    <div class="hint" style="margin-top:8px">⚠️ Desconfie de "pacotes" de Simplo/Dicatec/Doutor-IE vendidos por terceiros: as empresas declaram não ter revendedores autorizados.</div>
+  </div>
+
+  <div class="card noprint">
+    <h3 style="margin-top:0">💡 Macetes de oficina (consolidado)</h3>
+    <ul class="tips" id="tipsList"></ul>
+  </div>
+
+  <div class="card noprint" style="text-align:center">
+    <button class="sec" onclick="window.print()">🖨️ Imprimir / Salvar relatório em PDF</button>
+    <span class="hint" style="display:block">O relatório impresso inclui todos os códigos, causas e roteiro de testes marcados.</span>
+  </div>
+</div>
+
+<footer>
+  Fontes consolidadas: práticas de diagnóstico das plataformas Dicatec / Simplo / Doutor-IE (esquema elétrico inteligente, localização de componentes,
+  torques, sincronismo, códigos de falha) + fontes gratuitas (OBD-codes.com, SMDT Códigos OBD-II, schematics-wiring, AutoZone Repair Guides,
+  Tutoriais-Youtube-Dicas, ManualPDF.com.br — manuais do proprietário com quadro de fusíveis e manutenção).<br>
+  ⚠️ Ferramenta de apoio didático. Confirme sempre com a documentação oficial da montadora antes de executar reparos. Não é substituto do suporte técnico profissional.
+</footer>
+
+<script src="kb.js"></script>
+<script>
+const KB = {...GENERIC_CODES, ...OEM_CODES};
+const sevName = {1:["Leve","s1","Pode esperar — sem risco imediato"],2:["Moderada","s2","Atenção — pode piorar ou gerar outros danos"],3:["Crítica","s3","Resolva IMEDIATAMENTE — risco de dano grave ou segurança"]};
+
+// dicas
+(function(){const ul=document.getElementById('tipsList');TIPS.forEach(t=>{const li=document.createElement('li');li.textContent=t;ul.appendChild(li)})})();
+
+// busca de manual do proprietário no ManualPDF
+function openManual(){
+  const q=(document.getElementById('manualInput').value||"").trim();
+  if(!q){document.getElementById('manualInput').focus();return}
+  window.open("https://www.manualpdf.com.br/carros-barcos-motos/carros?q="+encodeURIComponent(q),"_blank");
+}
+
+// tags rápidas de sintoma
+(function(){
+  const box=document.getElementById('quickTags');
+  ["não parte","trepidação","luz de motor","consumo alto","perda de potência","superaquec","câmbio patina","luz abs","lenta oscilando","fumaça preta"].forEach(t=>{
+    const s=document.createElement('span');s.className='tag';s.textContent=t;s.onclick=()=>{document.getElementById('symInput').value=t;searchSymptom()};box.appendChild(s);
+  });
+})();
+
+function extractCodes(txt){
+  return (txt||"").toUpperCase().match(/\b[PCBU][0-3][0-9A-F]{3}\b/g)||[];
+}
+
+function pct(w, max){return Math.round(w/max*100)}
+
+function cardHTML(code, data, idx){
+  const s=sevName[data.sev];
+  const maxC=Math.max(...data.causes.map(c=>c.w));
+  const causes=data.causes.slice().sort((a,b)=>b.w-a.w).map(c=>
+    `<div class="cause"><div class="barbg"><div class="bar" style="width:${pct(c.w,maxC)}%"></div><div class="barlabel"><span>${c.c}</span><span class="pct">${pct(c.w,maxC)}%</span></div></div></div>`
+  ).join("");
+  const tests=data.tests.map((t,i)=>`<li data-key="${code}-${idx}-${i}" onclick="this.classList.toggle('done')">${t}</li>`).join("");
+  return `<div class="codecard ${data.sev===3?'crit':data.sev===2?'warn':'ok'}" data-code="${code}">
+    <div class="codehead">
+      <span class="dtc">${code}</span>
+      <span class="sev ${s[1]}">${s[0]}</span>
+      <span class="sys">${data.s}</span>
+    </div>
+    <div><strong>${data.t}</strong></div>
+    <div class="sym">Sintomas típicos: ${data.sym.join(" · ")}</div>
+    <h3>Causas prováveis (ordenadas)</h3>${causes}
+    <h3>Roteiro de testes (clique para marcar)</h3><ul class="tests">${tests}</ul>
+    <div class="sevline"><strong>Severidade:</strong> ${s[2]}</div>
+  </div>`;
+}
+
+function combinedHTML(codes){
+  const s=new Set(); codes.forEach(c=>{const d=KB[c]; if(d) d.sym.forEach(x=>s.add(x))});
+  const groups={}; codes.forEach(c=>{const d=KB[c]; if(d){(groups[d.s]=groups[d.s]||[]).push(c)}});
+  const groupsHTML=Object.entries(groups).map(([g,list])=>`<div><span class="chip">${g}</span> ${list.join(", ")}</div>`).join("");
+  let analysis=[];
+  const has=(c)=>codes.includes(c);
+  if(has("P0171")&&has("P0300")) analysis.push("Magra + misfire: o vazamento de ar/mistura magra <strong>pode ser a causa</strong> da falha de ignição. Resolva P0171 primeiro e reavalie o P0300.");
+  if(has("P0172")&&(has("P0300")||/P030[1-4]/.test(codes.join()))) analysis.push("Rica + misfire: bico vazando no cilindro afetado é o principal suspeito — cheque velas molhadas / teste de vazamento dos bicos.");
+  if(has("P0128")&&(has("P0172")||has("P0132"))) analysis.push("Motor frio demais (P0128) faz o ECU enriquecer a mistura — o termostato preso aberto <strong>explica</strong> o código de mistura rica. Troque o termostato antes de trocar sonda/bicos.");
+  if((has("P0420")||has("P0430"))&&(has("P0171")||has("P0172"))) analysis.push("Mistura errada + catalisador: mistura crônica destrói o catalisador. Corrija P0171/P0172, rode e só depois avalie o catalisador.");
+  if(has("P0299")&&has("P0401")) analysis.push("Underboost + EGR: fuligem de EGR/intercooler obstruindo o sistema de carga é o padrão em diesel. Limpe EGR + intercooler + tubos.");
+  if(has("P0011")&&has("P0300")) analysis.push("VVT avançado + misfire: óleo velho/solenóide VVT. Troque óleo e filtro antes de qualquer peça.");
+  if(/U01/.test(codes.join())) analysis.push("Códigos U (rede CAN): comece por fusíveis e alimentação dos módulos apontados — falha de rede gera cascata de códigos falsos em outros módulos.");
+  if(codes.length>3) analysis.push("Muitos códigos simultâneos: suspeite de <strong>bateria fraca / tensão baixa / terra ruim</strong> antes de qualquer peça. Teste bateria e carga (13,8–14,4V).");
+  if(has("P0562")) analysis.push("Tensão baixa: TODOS os outros códigos podem ser consequência. Resolva a carga primeiro.");
+  if(has("P0700")) analysis.push("P0700 é um aviso: o código real está no módulo do câmbio (P07xx). Leia o TCM com scanner compatível.");
+  if(!analysis.length) analysis.push("Códigos independentes — trate cada um pela ordem de severidade (críticos primeiro).");
+  return `<div class="combined"><h2>🔗 Análise combinada dos códigos</h2>${groupsHTML}${analysis.map(a=>`<p style="margin-top:8px">• ${a}</p>`).join("")}</div>`;
+}
+
+function diagnose(){
+  const raw=document.getElementById('dtcInput').value;
+  const codes=extractCodes(raw);
+  const out=document.getElementById('out');
+  if(!codes.length){out.innerHTML=`<div class="card"><strong>Nenhum código válido encontrado.</strong><div class="hint">Formato esperado: P0300, B1342, C0035, U0100...</div></div>`;return}
+  const found=codes.filter(c=>KB[c]), missing=codes.filter(c=>!KB[c]);
+  const sevMax=Math.max(...found.map(c=>KB[c].sev));
+  const s=sevName[sevMax];
+  let html=`<div class="card">
+    <h3 style="margin-top:0">Resultado da interpretação</h3>
+    <p>${found.length} código(s) conhecido(s) ${missing.length?`· ${missing.length} não catalogado(s): <strong>${missing.join(", ")}</strong> (consulte a tabela do fabricante — Dicatec/Simplo/Doutor-IE têm as tabelas por marca)`:""}</p>
+    <div style="margin-top:8px"><span class="sev ${s[1]}">Prioridade: ${s[0]}</span> <span class="hint">${s[2]}</span></div>
+    ${combinedHTML(found)}
+    ${found.map((c,i)=>cardHTML(c,KB[c],i)).join("")}
+    <div style="margin-top:12px" class="hint">Ordem de trabalho sugerida: 1) bateria/tensão → 2) códigos críticos → 3) causas de maior % → 4) re-ler códigos após correção.</div>
+  </div>`;
+  out.innerHTML=html;
+  out.scrollIntoView({behavior:"smooth"});
+}
+
+function searchSymptom(){
+  const q=(document.getElementById('symInput').value||"").toLowerCase().trim();
+  const out=document.getElementById('out');
+  if(!q) return;
+  let best=[];
+  SYMPTOM_MAP.forEach(m=>{
+    let score=0; m.kw.forEach(k=>{if(q.includes(k)) score+=k.length});
+    if(score>0) best.push({m,score});
+  });
+  best.sort((a,b)=>b.score-a.score);
+  if(!best.length){
+    // fallback: buscar direto nos sintomas dos códigos
+    const hits=Object.entries(KB).filter(([c,d])=>d.sym.some(s=>s.toLowerCase().includes(q))||d.t.toLowerCase().includes(q)).slice(0,6);
+    if(!hits.length){out.innerHTML=`<div class="card"><strong>Sintoma não catalogado.</strong><div class="hint">Tente termos como "não parte", "trepidação", "consumo", "luz de motor"...</div></div>`;return}
+    const codes=hits.map(h=>h[0]);
+    out.innerHTML=`<div class="card"><h3 style="margin-top:0">Sintomas relacionados a "${q}"</h3><p>${codes.map(c=>`<span class="tag" onclick="document.getElementById('dtcInput').value+=' ${c}'; diagnose()">${c}</span>`).join("")}</p></div>`;
+    return;
+  }
+  const m=best[0].m;
+  out.innerHTML=`<div class="card">
+    <h3 style="margin-top:0">Sintoma: "${document.getElementById('symInput').value}"</h3>
+    <p class="hint">💡 ${m.tip}</p>
+    <p style="margin-top:8px">Códigos mais prováveis para este sintoma:</p>
+    <div>${m.dts.filter(c=>KB[c]).map(c=>`<span class="tag" onclick="document.getElementById('dtcInput').value+=' ${c}'; diagnose()">${c}</span>`).join("")}</div>
+    <div class="hint" style="margin-top:8px">Clique nos códigos acima para ver a interpretação completa (causas + roteiro de testes).</div>
+  </div>`;
+  out.scrollIntoView({behavior:"smooth"});
+}
+</script>
+</body>
+</html>
