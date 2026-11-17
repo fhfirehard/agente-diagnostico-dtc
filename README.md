@@ -175,6 +175,9 @@ schtasks /Create /TN "Monitor-Manuais" ^
 ```
 
 Ao concluir, o script envia o e-mail de conclusão e remove a tarefa agendada.
+O fim do download é detectado pelo marcador `manuais/pdfs/.concluido` (gravado
+pelo downloader ao esgotar a fila); manuais indisponíveis no site de origem
+aparecem entre parênteses no e-mail de conclusão.
 O envio usa o relé gratuito FormSubmit (sem credenciais); os e-mails chegam
 remetidos por formsubmit.co.
 

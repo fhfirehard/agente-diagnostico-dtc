@@ -308,4 +308,6 @@ async function worker() {
 }
 await Promise.all(Array.from({ length: CONC_M }, worker));
 let pgs = 0; locaisMap.forEach(v => pgs += v.paginas);
-log(`✓ concluído — ${locaisMap.size} manuais · ${pgs} páginas · índice atualizado`);
+log(`✓ concluído - ${locaisMap.size} manuais · ${pgs} páginas · índice atualizado`);
+// marcador de fim: o monitor de e-mails usa este arquivo para detectar a conclusão
+try { writeFileSync(join(OUTDIR, ".concluido"), `${new Date().toISOString()} ${locaisMap.size} manuais\n`); } catch { }

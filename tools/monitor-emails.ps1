@@ -147,8 +147,10 @@ $gb   = [math]::Round($p.bytes / 1GB, 2)
 $livre = [math]::Round((Get-PSDrive C).Free / 1GB, 1)
 $projGB = if ($p.manuais -gt 0) { [math]::Round(($p.bytes / $p.manuais) * $p.total / 1GB, 0) } else { 0 }
 
-$nodeOn = ((Get-Process node -ErrorAction SilentlyContinue | Measure-Object).Count) -gt 0
-$terminou = ($p.manuais -ge $p.total)
+$nodeOn = ((Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "baixar-manuais" } | Measure-Object).Count) -gt 0
+# terminou: bateu o total do catálogo OU o downloader esgotou a fila (marcador)
+$marcador = Join-Path $Root "manuais\pdfs\.concluido"
+$terminou = ($p.manuais -ge $p.total) -or (Test-Path $marcador)
 
 # ---------------- estados em um arquivo de flags ----------------
 $flagF = Join-Path $PSScriptRoot "monitor-flags.json"
@@ -195,7 +197,9 @@ if ($livre -lt 15) {
 
 if ($terminou) {
   if (-not $flags.concluido) {
-    $ass = "[Manuais] CONCLUÍDO: {0}/{1} manuais" -f $p.manuais, $p.total
+    $faltantes = [math]::Max(0, $p.total - $p.manuais)
+    $suf = if ($faltantes -gt 0) { " ({0} indisponíveis no site)" -f $faltantes } else { "" }
+    $ass = "[Manuais] CONCLUÍDO: {0}/{1} manuais{2}" -f $p.manuais, $p.total, $suf
     Send-Mail $ass (Dados-Relatorio "CONCLUSÃO") | Out-Null
     $flags.concluido = $true
     $flags | ConvertTo-Json | Set-Content $flagF -Encoding UTF8
